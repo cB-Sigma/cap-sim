@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.3.1 (2026-10-12)
+
+- The repository no longer carries a compiled `capsim` binary, published by mistake in v0.3.0. No code changed.
+
 ## v0.3.0 (2026-10-12)
 
 Needs github.com/cB-Sigma/cap v0.3.0. Added, all backwards compatible:
