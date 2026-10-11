@@ -32,6 +32,12 @@ and the `-format edxl` and `-profile` flags of the command.
 
 No text of these documents is reproduced.
 
+v0.3.0 (2026-10-12) added more.go and v030_test.go, written for this
+module, from RFC 5005 (feed paging), RFC 5280 (certificate revocation
+lists, CRL distribution points), RFC 6960 (OCSP; requests and responses
+through golang.org/x/crypto/ocsp) and EDXL-DE 2.0 (through cap's
+`WriteEDXLDE2`), used as facts.
+
 ## Test data
 
 The demo alert (SIM-0001 from capsim@example.test over "Demo district"),

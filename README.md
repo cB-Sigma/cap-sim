@@ -11,10 +11,13 @@ authority. It is built on [cap](https://github.com/cB-Sigma/cap).
 
 | Part | Behaviour |
 |---|---|
-| Feed server | serves `/feed` as Atom with embedded alerts (`AtomEmbedded`), Atom linking to the documents (`AtomLinked`), RSS 2.0 linking to them (`RSSLinked`) or an EDXL-DE 1.0 envelope embedding them (`EDXLEmbedded`); the documents at `/docs/<n>.xml`; newest first; `ETag` and `Last-Modified`, 304 for a matching `If-None-Match` or an `If-Modified-Since` not older than the last change; signs the alerts it is given with `SetSigner`; can be set down (503); counts feed requests, 304 answers and document GETs |
-| Receiver | accepts CAP documents by `POST /cap` with `Content-Type: application/cap+xml`; optional bearer token (401 without it); with `SetVerifier`, refuses unsigned (when required) or tampered alerts (403) and keeps the verified alert; refuses malformed (400) and invalid (422) alerts, invalid under `SetProfiles` too; `Refused` says why; can fail the next n posts or stay down (503); keeps the valid alerts and their raw bodies |
+| Feed server | serves `/feed` as Atom with embedded alerts (`AtomEmbedded`), Atom linking to the documents (`AtomLinked`), RSS 2.0 linking to them (`RSSLinked`), an EDXL-DE 1.0 or 2.0 envelope embedding them (`EDXLEmbedded`, `EDXL2Embedded`) or the newest alert alone (`BareAlert`); the documents at `/docs/<n>.xml`, and in JSON at `/docs/<n>.json`; over HTTPS with `NewFeedTLS`; Atom paged by `PageSize` with RFC 5005 next links; Update and Cancel chains (`Update`, `Cancel`); newest first; `ETag` and `Last-Modified`, 304 for a matching `If-None-Match` or an `If-Modified-Since` not older than the last change; signs the alerts it is given with `SetSigner`; can be set down (503); counts feed requests, 304 answers and document GETs |
+| Receiver | accepts CAP documents by `POST /cap` (over HTTPS with `NewReceiverTLS`) with `Content-Type: application/cap+xml`; optional bearer token (401 without it); with `SetVerifier`, refuses unsigned (when required) or tampered alerts (403) and keeps the verified alert; refuses malformed (400) and invalid (422) alerts, invalid under `SetProfiles` too; `Refused` says why; can fail the next n posts or stay down (503); keeps the valid alerts and their raw bodies |
 
-Not simulated: HTTPS, paging.
+| Certificate authority | `NewCA` issues signing certificates that name its CRL and OCSP responder, serves both, and revokes on request (`Revoke`), so revocation checks can be tried end to end |
+
+Not simulated: the NAAD System's TCP stream (capnet's tests serve a
+local one) and IPAWS-OPEN.
 
 ## Install
 
@@ -28,13 +31,13 @@ Requires Go 1.27.1 or later.
 ## Command
 
 ```
-capsim feed|receiver [-listen addr] [-format atom|atom-linked|rss|edxl] [-token t] [-profile CAP-CP|IPAWS|India]
+capsim feed|receiver [-listen addr] [-format atom|atom-linked|rss|edxl|edxl2|bare] [-token t] [-profile CAP-CP|IPAWS|India]
 ```
 
 | Flag | Default | Meaning |
 |---|---|---|
 | `-listen` | `127.0.0.1:8098` | address to listen on |
-| `-format` | `atom` | feed: `atom` (embedded alerts), `atom-linked`, `rss` or `edxl` (an EDXL-DE envelope) |
+| `-format` | `atom` | feed: `atom` (embedded alerts), `atom-linked`, `rss`, `edxl` (an EDXL-DE 1.0 envelope), `edxl2` (EDXL-DE 2.0) or `bare` (the alert alone) |
 | `-token` | none | receiver: bearer token required |
 | `-profile` | none | receiver: also refuse alerts with errors under this profile |
 

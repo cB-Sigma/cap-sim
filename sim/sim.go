@@ -24,10 +24,12 @@ import (
 type Format int
 
 const (
-	AtomEmbedded Format = iota // Atom entries carrying the alert in their content
-	AtomLinked                 // Atom entries linking to the CAP document
-	RSSLinked                  // RSS 2.0 items linking to the CAP document (SACHET's form)
-	EDXLEmbedded               // an EDXL-DE 1.0 envelope with one content object per alert
+	AtomEmbedded  Format = iota // Atom entries carrying the alert in their content
+	AtomLinked                  // Atom entries linking to the CAP document
+	RSSLinked                   // RSS 2.0 items linking to the CAP document (SACHET's form)
+	EDXLEmbedded                // an EDXL-DE 1.0 envelope with one content object per alert
+	EDXL2Embedded               // an EDXL-DE 2.0 envelope with one content object per alert
+	BareAlert                   // the newest alert itself, no feed around it
 )
 
 // Feed is a CAP feed server.
@@ -45,6 +47,9 @@ type Feed struct {
 	DocGETs     int
 	Down        bool // answer 503
 	signer      *cap.Signer
+	// PageSize, when over 0, pages an Atom feed (RFC 5005): /feed holds the
+	// newest PageSize entries and links rel="next" to /feed?page=2.
+	PageSize int
 }
 
 // SetSigner makes the feed sign the alerts added after it with s (nil
@@ -143,9 +148,27 @@ func (s *Feed) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.HasPrefix(r.URL.Path, "/docs/") {
 		s.DocGETs++
-		n, err := strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/docs/"), ".xml"))
+		name := strings.TrimPrefix(r.URL.Path, "/docs/")
+		asJSON := strings.HasSuffix(name, ".json")
+		n, err := strconv.Atoi(strings.TrimSuffix(strings.TrimSuffix(name, ".xml"), ".json"))
 		if err != nil || n < 0 || n >= len(s.docs) {
 			http.NotFound(w, r)
+			return
+		}
+		if asJSON {
+			// The alert in JSON with CAP element names (cap.MarshalJSONCAP).
+			a, err := cap.Parse(s.docs[n])
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+				return
+			}
+			b, err := a.MarshalJSONCAP()
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write(b)
 			return
 		}
 		w.Header().Set("Content-Type", cap.MediaType)
@@ -174,6 +197,31 @@ func (s *Feed) serve(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Last-Modified", s.modified.Format(http.TimeFormat))
 	var b strings.Builder
 	switch s.format {
+	case BareAlert:
+		if len(s.docs) == 0 {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", cap.MediaType)
+		b.Write(s.docs[len(s.docs)-1])
+	case EDXL2Embedded:
+		cs := make([]cap.EDXLContent, 0, len(s.docs))
+		for i := len(s.docs) - 1; i >= 0; i-- {
+			cs = append(cs, cap.EDXLContent{Doc: s.docs[i], Description: fmt.Sprintf("alert %d", i)})
+		}
+		if len(cs) == 0 {
+			http.NotFound(w, r)
+			return
+		}
+		out, err := cap.WriteEDXLDE2(cap.Distribution{ID: fmt.Sprintf("sim-%d", s.version), SenderID: "capsim@example.test",
+			Sent: cap.FormatTime(s.modified), Expires: cap.FormatTime(s.modified.Add(24 * time.Hour)),
+			Status: "Exercise", Type: "Report"}, cs...)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/xml")
+		b.Write(out)
 	case RSSLinked:
 		w.Header().Set("Content-Type", "application/rss+xml")
 		b.WriteString(`<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>Simulated CAP feed</title>`)
@@ -196,12 +244,24 @@ func (s *Feed) serve(w http.ResponseWriter, r *http.Request) {
 	default:
 		w.Header().Set("Content-Type", "application/atom+xml")
 		b.WriteString(`<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom"><id>urn:sim</id><title>Simulated CAP feed</title>`)
-		for i := len(s.docs) - 1; i >= 0; i-- {
+		from, to := len(s.docs)-1, 0 // newest first
+		if s.PageSize > 0 {
+			page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+			if page < 1 {
+				page = 1
+			}
+			from = len(s.docs) - 1 - (page-1)*s.PageSize
+			to = max(from-s.PageSize+1, 0)
+			if to > 0 {
+				fmt.Fprintf(&b, `<link rel="next" href="%s/feed?page=%d"/>`, scheme(r)+"://"+r.Host, page+1)
+			}
+		}
+		for i := from; i >= to; i-- {
 			fmt.Fprintf(&b, `<entry><id>urn:sim:%d</id><title>alert %d</title><updated>%s</updated>`, i, i, s.modified.Format(time.RFC3339))
 			if s.format == AtomEmbedded {
 				fmt.Fprintf(&b, `<content type="application/cap+xml">%s</content>`, withoutDecl(s.docs[i]))
 			} else {
-				fmt.Fprintf(&b, `<link rel="alternate" type="application/cap+xml" href="%s/docs/%d.xml"/>`, "http://"+r.Host, i)
+				fmt.Fprintf(&b, `<link rel="alternate" type="application/cap+xml" href="%s/docs/%d.xml"/>`, scheme(r)+"://"+r.Host, i)
 			}
 			b.WriteString(`</entry>`)
 		}

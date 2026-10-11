@@ -58,7 +58,7 @@ func start(t *testing.T, args ...string) (string, *syncBuf) {
 }
 
 func TestFeedServesAValidAlert(t *testing.T) {
-	for _, f := range []string{"atom", "atom-linked", "rss", "edxl"} {
+	for _, f := range []string{"atom", "atom-linked", "rss", "edxl", "edxl2", "bare"} {
 		url, _ := start(t, "feed", "-listen", "127.0.0.1:0", "-format", f)
 		resp, err := http.Get(url)
 		if err != nil {
@@ -70,7 +70,7 @@ func TestFeedServesAValidAlert(t *testing.T) {
 		if err != nil || len(entries) != 1 {
 			t.Fatalf("%s: %v %d", f, err, len(entries))
 		}
-		if f == "atom" || f == "edxl" {
+		if f == "atom" || f == "edxl" || f == "edxl2" || f == "bare" {
 			if a := entries[0].Alert; a == nil || a.Validate(cap.Options{}) != nil {
 				t.Errorf("embedded alert %+v is not valid", a)
 			}

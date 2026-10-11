@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.3.0 (2026-10-12)
+
+Needs github.com/cB-Sigma/cap v0.3.0. Added, all backwards compatible:
+
+- Feed formats `EDXL2Embedded` (an EDXL-DE 2.0 envelope) and `BareAlert`
+  (the newest alert alone); `capsim feed -format edxl2|bare`.
+- Documents in JSON with CAP element names at `/docs/<n>.json`.
+- HTTPS: `NewFeedTLS`, `NewReceiverTLS` and `Client` on both.
+- Paging: `Feed.PageSize` pages an Atom feed with RFC 5005 rel="next"
+  links (read by `capnet.Poller` with `MaxPages`).
+- Update and Cancel chains: `Feed.Update`, `Feed.Cancel`.
+- `CA`: a simulated certificate authority that issues signing
+  certificates naming its CRL and OCSP responder, serves both, and
+  revokes on request (`NewCA`, `Issue`, `Revoke`, `RootPEM`).
+
 ## v0.2.0 (2026-10-11)
 
 Needs github.com/cB-Sigma/cap v0.2.0. Added, all backwards compatible:

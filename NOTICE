@@ -28,6 +28,10 @@ Dependencies
 - github.com/russellhaering/goxmldsig (Apache-2.0, Copyright Russell
   Haering and contributors), through cap.
 - github.com/jonboulle/clockwork (Apache-2.0), through goxmldsig.
+- golang.org/x/crypto (BSD-3-Clause, Copyright The Go Authors): the
+  simulated CA's OCSP responder.
+- github.com/cB-Sigma/xsd (Apache-2.0, Copyright Abhinav Gautam), through
+  cap's capxsd package.
 - The Go standard library (BSD-3-Clause, Copyright The Go Authors).
 
 Test data

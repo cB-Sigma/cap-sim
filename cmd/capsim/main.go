@@ -8,6 +8,7 @@
 //
 //	capsim feed -listen 127.0.0.1:8098 -format rss
 //	capsim feed -listen 127.0.0.1:8098 -format edxl
+//	capsim feed -listen 127.0.0.1:8098 -format edxl2
 //	capsim receiver -listen 127.0.0.1:8099 -token demo-token -profile IPAWS
 //
 // The feed is at /feed; the receiver takes POSTs at /cap.
@@ -62,12 +63,12 @@ func demoAlert(now time.Time) *cap.Alert {
 // served.
 func run(ctx context.Context, args []string, out io.Writer, ready chan<- string) error {
 	if len(args) == 0 || (args[0] != "feed" && args[0] != "receiver") {
-		return errors.New("usage: capsim feed|receiver [-listen addr] [-format atom|atom-linked|rss|edxl] [-token t] [-profile CAP-CP|IPAWS|India]")
+		return errors.New("usage: capsim feed|receiver [-listen addr] [-format atom|atom-linked|rss|edxl|edxl2|bare] [-token t] [-profile CAP-CP|IPAWS|India]")
 	}
 	fs := flag.NewFlagSet("capsim "+args[0], flag.ContinueOnError)
 	fs.SetOutput(out)
 	listen := fs.String("listen", "127.0.0.1:8098", "address to listen on")
-	format := fs.String("format", "atom", "feed format: atom (embedded alerts), atom-linked, rss or edxl (an EDXL-DE envelope)")
+	format := fs.String("format", "atom", "feed format: atom (embedded alerts), atom-linked, rss, edxl (an EDXL-DE 1.0 envelope), edxl2 (EDXL-DE 2.0) or bare (the alert alone)")
 	token := fs.String("token", "", "receiver: bearer token required (empty: none)")
 	profile := fs.String("profile", "", "receiver: also validate against this profile (CAP-CP, IPAWS or India)")
 	if err := fs.Parse(args[1:]); err != nil {
@@ -85,7 +86,7 @@ func run(ctx context.Context, args []string, out io.Writer, ready chan<- string)
 	var receiver *sim.Receiver
 	switch args[0] {
 	case "feed":
-		f, ok := map[string]sim.Format{"atom": sim.AtomEmbedded, "atom-linked": sim.AtomLinked, "rss": sim.RSSLinked, "edxl": sim.EDXLEmbedded}[*format]
+		f, ok := map[string]sim.Format{"atom": sim.AtomEmbedded, "atom-linked": sim.AtomLinked, "rss": sim.RSSLinked, "edxl": sim.EDXLEmbedded, "edxl2": sim.EDXL2Embedded, "bare": sim.BareAlert}[*format]
 		if !ok {
 			return fmt.Errorf("unknown -format %q", *format)
 		}

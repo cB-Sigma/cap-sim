@@ -1,7 +1,9 @@
 github.com/beevik/etree v1.6.0 h1:u8Kwy8pp9D9XeITj2Z0XtA5qqZEmtJtuXZRQi+j03eE=
 github.com/beevik/etree v1.6.0/go.mod h1:bh4zJxiIr62SOf9pRzN7UUYaEDa9HEKafK25+sLc0Gc=
-github.com/cB-Sigma/cap v0.2.0 h1:kLxInO2WDuUI/0jlaPKKdKNOnC+Ffj+9jUmW+Hr/kig=
-github.com/cB-Sigma/cap v0.2.0/go.mod h1:uA3etUEAOD6K3dyyj/NLCW8vx7W0XqZUWWyLuT0NHTU=
+github.com/cB-Sigma/cap v0.3.0 h1:kEnApDTH78GdBrANpuOn2Vcz/HbflJNNu9czI5xbsLo=
+github.com/cB-Sigma/cap v0.3.0/go.mod h1:BOJIuHin2+Rywvc42N7b3I+B0CXDoR4sOKosT/UUoHo=
+github.com/cB-Sigma/xsd v0.3.0 h1:Fq/24Dm+/Ox7dIQ8n8ylHYwfVpCmtoUwG3Tt/nT926Q=
+github.com/cB-Sigma/xsd v0.3.0/go.mod h1:eX7OJSR6arn8kZCjtRlSxhyP41YumLLx6kX2yIVRZCA=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/jonboulle/clockwork v0.5.0 h1:Hyh9A8u51kptdkR+cqRpT1EebBwTn1oK9YfGYbdFz6I=
