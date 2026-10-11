@@ -1,0 +1,37 @@
+cap-sim (simulated CAP feed server and receiver, in Go)
+Copyright 2026 Abhinav Gautam
+
+This module is licensed under the Apache License, Version 2.0 (LICENSE).
+
+The code was written for SigmaM2M from the documents listed in
+PROVENANCE.md. It contains no code from other projects. sim/sim.go comes
+from SigmaM2M and carries no per-file copyright header (the convention of
+the code it comes from); the copyright line above covers it. Files added
+for this module carry "Copyright 2026 Abhinav Gautam" and
+"SPDX-License-Identifier: Apache-2.0".
+
+Trademarks
+----------
+
+OASIS is a trademark of OASIS Open. "Common Alerting Protocol" and "CAP"
+are used here only to name the standard the simulated messages follow.
+This module is not affiliated with, sponsored by or endorsed by OASIS
+Open.
+
+Dependencies
+------------
+
+- github.com/cB-Sigma/cap (Apache-2.0, Copyright 2026 Abhinav Gautam):
+  the CAP model, reader and writer.
+- github.com/beevik/etree (BSD-2-Clause, Copyright Brett Vickers),
+  through cap.
+- github.com/russellhaering/goxmldsig (Apache-2.0, Copyright Russell
+  Haering and contributors), through cap.
+- github.com/jonboulle/clockwork (Apache-2.0), through goxmldsig.
+- The Go standard library (BSD-3-Clause, Copyright The Go Authors).
+
+Test data
+---------
+
+Every alert, sender, identifier, area and token in the simulator, the
+command and the tests is a made-up demo value.
