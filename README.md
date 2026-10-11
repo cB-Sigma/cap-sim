@@ -11,11 +11,10 @@ authority. It is built on [cap](https://github.com/cB-Sigma/cap).
 
 | Part | Behaviour |
 |---|---|
-| Feed server | serves `/feed` as Atom with embedded alerts (`AtomEmbedded`), Atom linking to the documents (`AtomLinked`) or RSS 2.0 linking to them (`RSSLinked`); the documents at `/docs/<n>.xml`; newest first; `ETag` and `Last-Modified`, 304 for a matching `If-None-Match`; can be set down (503); counts feed requests, 304 answers and document GETs |
-| Receiver | accepts CAP documents by `POST /cap` with `Content-Type: application/cap+xml`; optional bearer token (401 without it); refuses malformed (400) and invalid (422) alerts; can fail the next n posts or stay down (503); keeps the valid alerts and their raw bodies |
+| Feed server | serves `/feed` as Atom with embedded alerts (`AtomEmbedded`), Atom linking to the documents (`AtomLinked`), RSS 2.0 linking to them (`RSSLinked`) or an EDXL-DE 1.0 envelope embedding them (`EDXLEmbedded`); the documents at `/docs/<n>.xml`; newest first; `ETag` and `Last-Modified`, 304 for a matching `If-None-Match` or an `If-Modified-Since` not older than the last change; signs the alerts it is given with `SetSigner`; can be set down (503); counts feed requests, 304 answers and document GETs |
+| Receiver | accepts CAP documents by `POST /cap` with `Content-Type: application/cap+xml`; optional bearer token (401 without it); with `SetVerifier`, refuses unsigned (when required) or tampered alerts (403) and keeps the verified alert; refuses malformed (400) and invalid (422) alerts, invalid under `SetProfiles` too; `Refused` says why; can fail the next n posts or stay down (503); keeps the valid alerts and their raw bodies |
 
-Not simulated: signatures (the receiver does not check them), HTTPS,
-`If-Modified-Since`, paging.
+Not simulated: HTTPS, paging.
 
 ## Install
 
@@ -29,14 +28,15 @@ Requires Go 1.27.1 or later.
 ## Command
 
 ```
-capsim feed|receiver [-listen addr] [-format atom|atom-linked|rss] [-token t]
+capsim feed|receiver [-listen addr] [-format atom|atom-linked|rss|edxl] [-token t] [-profile CAP-CP|IPAWS|India]
 ```
 
 | Flag | Default | Meaning |
 |---|---|---|
 | `-listen` | `127.0.0.1:8098` | address to listen on |
-| `-format` | `atom` | feed: `atom` (embedded alerts), `atom-linked` or `rss` |
+| `-format` | `atom` | feed: `atom` (embedded alerts), `atom-linked`, `rss` or `edxl` (an EDXL-DE envelope) |
 | `-token` | none | receiver: bearer token required |
+| `-profile` | none | receiver: also refuse alerts with errors under this profile |
 
 The feed holds one demo alert. The receiver prints each valid alert it
 receives. Both run until interrupted. Output observed:
@@ -84,7 +84,9 @@ msgs := rc.Messages() // the valid alerts received, in order
 
 This mirrors the runnable `Example` in sim/sim_test.go. `NewFeedAt` and
 `NewReceiverAt` listen on a given address; `Feed.SetDown`,
-`Receiver.FailNext` and `Receiver.SetDown` inject failures.
+`Receiver.FailNext` and `Receiver.SetDown` inject failures;
+`Feed.SetSigner`, `Receiver.SetVerifier` and `Receiver.SetProfiles` try
+signatures and profiles end to end (`TestSignedFeedAndCheckingReceiver`).
 
 ## Documentation
 
@@ -92,7 +94,7 @@ API reference: https://pkg.go.dev/github.com/cB-Sigma/cap-sim
 
 | Package | What it does |
 |---|---|
-| `sim` | `Feed` (`NewFeed`, `NewFeedAt`, `Add`, `AddRaw`, `SetDown`, `Stats`) and `Receiver` (`NewReceiver`, `NewReceiverAt`, `Messages`, `Raw`, `FailNext`, `SetDown`) |
+| `sim` | `Feed` (`NewFeed`, `NewFeedAt`, `Add`, `AddRaw`, `SetSigner`, `SetDown`, `Stats`) and `Receiver` (`NewReceiver`, `NewReceiverAt`, `Messages`, `Raw`, `Refused`, `SetVerifier`, `SetProfiles`, `FailNext`, `SetDown`) |
 | `cmd/capsim` | the command above |
 
 ## Testing

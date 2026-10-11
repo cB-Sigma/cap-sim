@@ -5,8 +5,15 @@ package sim_test
 
 import (
 	"bytes"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"fmt"
 	"io"
+	"math/big"
 	"net/http"
 	"testing"
 	"time"
@@ -45,7 +52,7 @@ func get(t *testing.T, url, etag string) (*http.Response, []byte) {
 }
 
 func TestFeedRoundTrip(t *testing.T) {
-	for _, f := range []sim.Format{sim.AtomEmbedded, sim.AtomLinked, sim.RSSLinked} {
+	for _, f := range []sim.Format{sim.AtomEmbedded, sim.AtomLinked, sim.RSSLinked, sim.EDXLEmbedded} {
 		feed := sim.NewFeed(f)
 		feed.Add(demoAlert("SIM-1"))
 		resp, body := get(t, feed.URL(), "")
@@ -72,7 +79,14 @@ func TestFeedRoundTrip(t *testing.T) {
 		if r, _ := get(t, feed.URL(), etag); r.StatusCode != http.StatusNotModified {
 			t.Errorf("format %d: status %d, want 304", f, r.StatusCode)
 		}
+		lm := resp.Header.Get("Last-Modified")
+		if r := getSince(t, feed.URL(), lm); r != http.StatusNotModified {
+			t.Errorf("format %d: If-Modified-Since status %d, want 304", f, r)
+		}
 		feed.Add(demoAlert("SIM-2"))
+		if r := getSince(t, feed.URL(), lm); r != http.StatusOK {
+			t.Errorf("format %d: If-Modified-Since status %d after a new alert, want 200", f, r)
+		}
 		if r, _ := get(t, feed.URL(), etag); r.StatusCode != http.StatusOK {
 			t.Errorf("format %d: status %d after a new alert, want 200", f, r.StatusCode)
 		}
@@ -81,6 +95,86 @@ func TestFeedRoundTrip(t *testing.T) {
 			t.Errorf("format %d: status %d while down, want 503", f, r.StatusCode)
 		}
 		feed.Close()
+	}
+}
+
+func getSince(t *testing.T, url, since string) int {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodGet, url, nil)
+	req.Header.Set("If-Modified-Since", since)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	return resp.StatusCode
+}
+
+// keyPair makes a self-signed ECDSA certificate (PEM key, PEM certificate).
+func keyPair(t *testing.T) (string, string) {
+	t.Helper()
+	k, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "capsim.example.test"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour)}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, k.Public(), k)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kb, _ := x509.MarshalPKCS8PrivateKey(k)
+	return string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: kb})), string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
+}
+
+// A signing feed serves signed alerts that a verifying receiver accepts;
+// the receiver refuses unsigned (when required), tampered and
+// profile-failing alerts, saying why.
+func TestSignedFeedAndCheckingReceiver(t *testing.T) {
+	key, cert := keyPair(t)
+	sg, err := cap.NewSigner(cap.SignSettings{Key: key, Certificate: cert})
+	if err != nil {
+		t.Fatal(err)
+	}
+	feed := sim.NewFeed(sim.EDXLEmbedded)
+	defer feed.Close()
+	feed.SetSigner(sg)
+	feed.Add(demoAlert("SIM-S1"))
+	_, body := get(t, feed.URL(), "")
+	entries, err := cap.ParseFeed(body)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("entries %d, %v", len(entries), err)
+	}
+	v, _ := cap.NewVerifier(cap.VerifySettings{Trusted: []string{cert}, Require: true})
+	if _, state, err := v.Verify(entries[0].Raw); err != nil || state != cap.SignatureValid {
+		t.Fatalf("feed signature: %q, %v", state, err)
+	}
+
+	rc := sim.NewReceiver("")
+	defer rc.Close()
+	rc.SetVerifier(v)
+	signed := entries[0].Raw
+	if s := post(t, rc.URL(), "", signed); s != http.StatusNoContent {
+		t.Errorf("signed: status %d (%v)", s, rc.Refused())
+	}
+	unsigned, _ := demoAlert("SIM-S2").Marshal()
+	if s := post(t, rc.URL(), "", unsigned); s != http.StatusForbidden {
+		t.Errorf("unsigned: status %d", s)
+	}
+	tampered := bytes.Replace(signed, []byte("Heavy Rainfall"), []byte("Light Drizzle"), 1)
+	if s := post(t, rc.URL(), "", tampered); s != http.StatusForbidden {
+		t.Errorf("tampered: status %d", s)
+	}
+	rc.SetVerifier(nil)
+	rc.SetProfiles(cap.IPAWS())
+	if s := post(t, rc.URL(), "", unsigned); s != http.StatusUnprocessableEntity {
+		t.Errorf("IPAWS profile: status %d", s)
+	}
+	if r := rc.Refused(); len(r) != 3 || !bytes.Contains([]byte(r[2]), []byte("IPAWSv1.0")) {
+		t.Errorf("refused = %q", r)
+	}
+	if len(rc.Messages()) != 1 {
+		t.Errorf("messages = %d", len(rc.Messages()))
 	}
 }
 

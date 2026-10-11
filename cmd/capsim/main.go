@@ -7,7 +7,8 @@
 // authority. For example:
 //
 //	capsim feed -listen 127.0.0.1:8098 -format rss
-//	capsim receiver -listen 127.0.0.1:8099 -token demo-token
+//	capsim feed -listen 127.0.0.1:8098 -format edxl
+//	capsim receiver -listen 127.0.0.1:8099 -token demo-token -profile IPAWS
 //
 // The feed is at /feed; the receiver takes POSTs at /cap.
 package main
@@ -61,21 +62,30 @@ func demoAlert(now time.Time) *cap.Alert {
 // served.
 func run(ctx context.Context, args []string, out io.Writer, ready chan<- string) error {
 	if len(args) == 0 || (args[0] != "feed" && args[0] != "receiver") {
-		return errors.New("usage: capsim feed|receiver [-listen addr] [-format atom|atom-linked|rss] [-token t]")
+		return errors.New("usage: capsim feed|receiver [-listen addr] [-format atom|atom-linked|rss|edxl] [-token t] [-profile CAP-CP|IPAWS|India]")
 	}
 	fs := flag.NewFlagSet("capsim "+args[0], flag.ContinueOnError)
 	fs.SetOutput(out)
 	listen := fs.String("listen", "127.0.0.1:8098", "address to listen on")
-	format := fs.String("format", "atom", "feed format: atom (embedded alerts), atom-linked or rss")
+	format := fs.String("format", "atom", "feed format: atom (embedded alerts), atom-linked, rss or edxl (an EDXL-DE envelope)")
 	token := fs.String("token", "", "receiver: bearer token required (empty: none)")
+	profile := fs.String("profile", "", "receiver: also validate against this profile (CAP-CP, IPAWS or India)")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
+	}
+	var profiles []cap.Profile
+	if *profile != "" {
+		p, ok := cap.ProfileByName(*profile)
+		if !ok {
+			return fmt.Errorf("unknown -profile %q (known: %v)", *profile, cap.ProfileNames())
+		}
+		profiles = append(profiles, p)
 	}
 	var url string
 	var receiver *sim.Receiver
 	switch args[0] {
 	case "feed":
-		f, ok := map[string]sim.Format{"atom": sim.AtomEmbedded, "atom-linked": sim.AtomLinked, "rss": sim.RSSLinked}[*format]
+		f, ok := map[string]sim.Format{"atom": sim.AtomEmbedded, "atom-linked": sim.AtomLinked, "rss": sim.RSSLinked, "edxl": sim.EDXLEmbedded}[*format]
 		if !ok {
 			return fmt.Errorf("unknown -format %q", *format)
 		}
@@ -92,6 +102,7 @@ func run(ctx context.Context, args []string, out io.Writer, ready chan<- string)
 			return err
 		}
 		defer rc.Close()
+		rc.SetProfiles(profiles...)
 		receiver, url = rc, rc.URL()
 	}
 	fmt.Fprintf(out, "capsim %s at %s\n", args[0], url)

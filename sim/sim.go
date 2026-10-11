@@ -1,10 +1,12 @@
 // Package sim simulates the two ends of a CAP exchange for tests: a
-// feed server (Atom or RSS, with ETag and Last-Modified, whose entries
-// embed or link to CAP documents) and a receiver that accepts CAP messages
-// by HTTP POST.
+// feed server (Atom or RSS whose entries embed or link to CAP documents,
+// or an EDXL-DE envelope; ETag, Last-Modified and conditional GETs; signed
+// alerts on request) and a receiver that accepts CAP messages by HTTP
+// POST, optionally checking signatures and profiles.
 package sim
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -25,6 +27,7 @@ const (
 	AtomEmbedded Format = iota // Atom entries carrying the alert in their content
 	AtomLinked                 // Atom entries linking to the CAP document
 	RSSLinked                  // RSS 2.0 items linking to the CAP document (SACHET's form)
+	EDXLEmbedded               // an EDXL-DE 1.0 envelope with one content object per alert
 )
 
 // Feed is a CAP feed server.
@@ -41,6 +44,15 @@ type Feed struct {
 	NotModified int // feed GETs answered 304
 	DocGETs     int
 	Down        bool // answer 503
+	signer      *cap.Signer
+}
+
+// SetSigner makes the feed sign the alerts added after it with s (nil
+// stops signing).
+func (s *Feed) SetSigner(sg *cap.Signer) {
+	s.mu.Lock()
+	s.signer = sg
+	s.mu.Unlock()
 }
 
 // NewFeed starts a feed server on a loopback port.
@@ -80,11 +92,20 @@ func (s *Feed) URL() string { return s.srv.URL + "/feed" }
 // Close stops the server.
 func (s *Feed) Close() { s.srv.Close() }
 
-// Add publishes an alert.
+// Add publishes an alert, signed when a signer is set. It panics when the
+// alert cannot be encoded or signed.
 func (s *Feed) Add(a *cap.Alert) {
 	b, err := a.Marshal()
 	if err != nil {
 		panic(err)
+	}
+	s.mu.Lock()
+	sg := s.signer
+	s.mu.Unlock()
+	if sg != nil {
+		if b, err = sg.Sign(b); err != nil {
+			panic(err)
+		}
 	}
 	s.AddRaw(a.Identifier, b)
 }
@@ -137,7 +158,14 @@ func (s *Feed) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	s.Requests++
 	etag := fmt.Sprintf(`"v%d"`, s.version)
-	if r.Header.Get("If-None-Match") == etag {
+	inm, ims := r.Header.Get("If-None-Match"), r.Header.Get("If-Modified-Since")
+	notModified := inm == etag
+	if inm == "" && ims != "" {
+		if t, err := http.ParseTime(ims); err == nil && !s.modified.After(t) {
+			notModified = true
+		}
+	}
+	if notModified {
 		s.NotModified++
 		w.WriteHeader(http.StatusNotModified)
 		return
@@ -154,17 +182,24 @@ func (s *Feed) serve(w http.ResponseWriter, r *http.Request) {
 				i, i, s.ids[i], s.modified.Format(time.RFC1123Z))
 		}
 		b.WriteString(`</channel></rss>`)
+	case EDXLEmbedded:
+		w.Header().Set("Content-Type", "application/xml")
+		fmt.Fprintf(&b, `<?xml version="1.0" encoding="UTF-8"?><EDXLDistribution xmlns="%s"><distributionID>sim-%d</distributionID>`+
+			`<senderID>capsim@example.test</senderID><dateTimeSent>%s</dateTimeSent><distributionStatus>Exercise</distributionStatus>`+
+			`<distributionType>Report</distributionType><combinedConfidentiality>UNCLASSIFIED AND NOT SENSITIVE</combinedConfidentiality>`,
+			cap.EDXLDE10Namespace, s.version, cap.FormatTime(s.modified))
+		for i := len(s.docs) - 1; i >= 0; i-- {
+			fmt.Fprintf(&b, `<contentObject><contentDescription>alert %d</contentDescription><xmlContent><embeddedXMLContent>%s</embeddedXMLContent></xmlContent></contentObject>`,
+				i, withoutDecl(s.docs[i]))
+		}
+		b.WriteString(`</EDXLDistribution>`)
 	default:
 		w.Header().Set("Content-Type", "application/atom+xml")
 		b.WriteString(`<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom"><id>urn:sim</id><title>Simulated CAP feed</title>`)
 		for i := len(s.docs) - 1; i >= 0; i-- {
 			fmt.Fprintf(&b, `<entry><id>urn:sim:%d</id><title>alert %d</title><updated>%s</updated>`, i, i, s.modified.Format(time.RFC3339))
 			if s.format == AtomEmbedded {
-				doc := string(s.docs[i])
-				if j := strings.Index(doc, "?>"); j >= 0 && strings.HasPrefix(doc, "<?xml") {
-					doc = doc[j+2:]
-				}
-				fmt.Fprintf(&b, `<content type="application/cap+xml">%s</content>`, doc)
+				fmt.Fprintf(&b, `<content type="application/cap+xml">%s</content>`, withoutDecl(s.docs[i]))
 			} else {
 				fmt.Fprintf(&b, `<link rel="alternate" type="application/cap+xml" href="%s/docs/%d.xml"/>`, "http://"+r.Host, i)
 			}
@@ -175,17 +210,54 @@ func (s *Feed) serve(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.WriteString(w, b.String())
 }
 
+// withoutDecl drops a document's XML declaration, to embed it.
+func withoutDecl(b []byte) string {
+	doc := string(b)
+	if j := strings.Index(doc, "?>"); j >= 0 && strings.HasPrefix(doc, "<?xml") {
+		doc = doc[j+2:]
+	}
+	return doc
+}
+
 // Receiver accepts CAP messages by POST.
 type Receiver struct {
 	srv *httptest.Server
 	// Token, when set, is the bearer token required.
 	Token string
 
-	mu    sync.Mutex
-	msgs  []*cap.Alert
-	raws  [][]byte
-	fails int
-	down  bool
+	mu       sync.Mutex
+	msgs     []*cap.Alert
+	raws     [][]byte
+	fails    int
+	down     bool
+	verifier *cap.Verifier
+	profiles []cap.Profile
+	refused  []string
+}
+
+// SetVerifier makes the receiver check signatures with v: a message whose
+// signature does not verify (or an unsigned one, when v requires
+// signatures) is refused with 403, and the alert kept is the verified
+// one. nil stops checking.
+func (rc *Receiver) SetVerifier(v *cap.Verifier) {
+	rc.mu.Lock()
+	rc.verifier = v
+	rc.mu.Unlock()
+}
+
+// SetProfiles makes the receiver also validate against the profiles; an
+// alert with profile errors (not warnings) is refused with 422.
+func (rc *Receiver) SetProfiles(ps ...cap.Profile) {
+	rc.mu.Lock()
+	rc.profiles = ps
+	rc.mu.Unlock()
+}
+
+// Refused returns why each refused post was refused, in order.
+func (rc *Receiver) Refused() []string {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	return append([]string(nil), rc.refused...)
 }
 
 // Raw returns the bodies of the valid messages received, in order.
@@ -265,13 +337,30 @@ func (rc *Receiver) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	b, _ := io.ReadAll(r.Body)
-	a, err := cap.Parse(b)
+	refuse := func(msg string, code int) {
+		rc.refused = append(rc.refused, msg)
+		http.Error(w, msg, code)
+	}
+	doc := b
+	if rc.verifier != nil {
+		verified, _, err := rc.verifier.Verify(b)
+		if err != nil {
+			code := http.StatusForbidden
+			if !errors.Is(err, cap.ErrUnsigned) && strings.Contains(err.Error(), "not well-formed") {
+				code = http.StatusBadRequest
+			}
+			refuse(err.Error(), code)
+			return
+		}
+		doc = verified
+	}
+	a, err := cap.Parse(doc)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		refuse(err.Error(), http.StatusBadRequest)
 		return
 	}
-	if err := a.Validate(cap.Options{}); err != nil {
-		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+	if err := a.Validate(cap.Options{Profiles: rc.profiles}); err != nil {
+		refuse(err.Error(), http.StatusUnprocessableEntity)
 		return
 	}
 	rc.msgs = append(rc.msgs, a)

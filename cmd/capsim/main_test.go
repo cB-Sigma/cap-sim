@@ -58,7 +58,7 @@ func start(t *testing.T, args ...string) (string, *syncBuf) {
 }
 
 func TestFeedServesAValidAlert(t *testing.T) {
-	for _, f := range []string{"atom", "atom-linked", "rss"} {
+	for _, f := range []string{"atom", "atom-linked", "rss", "edxl"} {
 		url, _ := start(t, "feed", "-listen", "127.0.0.1:0", "-format", f)
 		resp, err := http.Get(url)
 		if err != nil {
@@ -70,7 +70,7 @@ func TestFeedServesAValidAlert(t *testing.T) {
 		if err != nil || len(entries) != 1 {
 			t.Fatalf("%s: %v %d", f, err, len(entries))
 		}
-		if f == "atom" {
+		if f == "atom" || f == "edxl" {
 			if a := entries[0].Alert; a == nil || a.Validate(cap.Options{}) != nil {
 				t.Errorf("embedded alert %+v is not valid", a)
 			}
@@ -109,5 +109,25 @@ func TestReceiverPrintsMessages(t *testing.T) {
 func TestUsage(t *testing.T) {
 	if err := run(context.Background(), nil, io.Discard, nil); err == nil {
 		t.Error("no mode accepted")
+	}
+	if err := run(context.Background(), []string{"receiver", "-profile", "nowhere"}, io.Discard, nil); err == nil || !strings.Contains(err.Error(), "unknown -profile") {
+		t.Errorf("unknown profile: %v", err)
+	}
+}
+
+// With -profile the receiver refuses an alert that breaks the profile.
+func TestReceiverProfile(t *testing.T) {
+	url, _ := start(t, "receiver", "-listen", "127.0.0.1:0", "-profile", "IPAWS")
+	doc, _ := demoAlert(time.Now()).Marshal()
+	req, _ := http.NewRequest(http.MethodPost, url, bytes.NewReader(doc))
+	req.Header.Set("Content-Type", cap.MediaType)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnprocessableEntity || !strings.Contains(string(body), "IPAWSv1.0") {
+		t.Errorf("status %d: %s", resp.StatusCode, body)
 	}
 }

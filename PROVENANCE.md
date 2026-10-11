@@ -17,17 +17,23 @@ it (the form used by some national alerting feeds, such as India's
 SACHET). The receiver follows the usual way of delivering CAP by HTTP
 POST with a bearer token.
 
+v0.2.0 (2026-10-11) added the EDXL-DE feed form, If-Modified-Since,
+signing feeds (`SetSigner`) and checking receivers (`SetVerifier`,
+`SetProfiles`, `Refused`), all through the cap module's own functions,
+and the `-format edxl` and `-profile` flags of the command.
+
 ## Sources
 
 | Area (files) | Followed |
 |---|---|
-| Alerts (through the cap module) | OASIS CAP 1.2, facts only |
-| Feeds (sim/sim.go) | RFC 4287 (Atom), RSS 2.0 |
-| HTTP caching (sim/sim.go) | RFC 9110 and RFC 9111: ETag, If-None-Match, Last-Modified, 304 |
+| Alerts, signatures, profiles (through the cap module) | OASIS CAP 1.2 and the documents listed in the cap module's PROVENANCE.md, facts only |
+| Feeds (sim/sim.go) | RFC 4287 (Atom), RSS 2.0, OASIS EDXL-DE 1.0 (element names) |
+| HTTP caching (sim/sim.go) | RFC 9110 and RFC 9111: ETag, If-None-Match, Last-Modified, If-Modified-Since, 304 |
 
 No text of these documents is reproduced.
 
 ## Test data
 
 The demo alert (SIM-0001 from capsim@example.test over "Demo district"),
-the identifiers, senders, areas and tokens in the tests are made up.
+the identifiers, senders, areas and tokens in the tests are made up; keys
+and certificates are generated at run time.
